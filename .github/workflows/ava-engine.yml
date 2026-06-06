@@ -1,0 +1,382 @@
+name: Ava Engine
+
+on:
+  workflow_call:
+    inputs:
+      prompt:
+        description: "The prompt to send to Agentforce"
+        required: true
+        type: string
+      auto_approve:
+        description: "Auto-approve Agentforce command prompts. Defaults to false — run fails if a command requires approval and this is not set. Enable by passing true from the caller (e.g. parse '- [x] auto-approve' from the issue body)."
+        required: false
+        type: boolean
+        default: false
+      auto_select:
+        description: "Auto-select the first option when Agentforce presents multiple choices. Defaults to false — run fails with a NEEDS_INPUT log section listing the options, so the prompt can be improved to answer the question upfront."
+        required: false
+        type: boolean
+        default: false
+      use_plan_mode:
+        description: "Start in Plan mode instead of Act mode. Agentforce will plan first, then switch to Act automatically when ready."
+        required: false
+        type: boolean
+        default: false
+      ava_profile:
+        description: "Optional built-in prompt profile name. Used to prepend standard run guidance before the prompt (for example, live-analysis or live-metadata)."
+        required: false
+        type: string
+        default: ""
+      prompt_prefix:
+        description: "Optional text prepended to the prompt before sending to Agentforce. Useful for per-run instructions (e.g. SF CLI flag guidance)."
+        required: false
+        type: string
+        default: ""
+      safe_commands_allowlist:
+        description: "Comma-separated list of commands to pre-add to the Agentforce safe commands allowlist. Overrides the profile-specific defaults; live-metadata adds Salesforce metadata retrieval commands when this input is left empty. Only used when auto_approve is true."
+        required: false
+        type: string
+        default: ""
+      issue_number:
+        description: "Issue number to post results to (optional)"
+        required: false
+        type: number
+        default: 0
+      issue_repo:
+        description: "Repo (owner/name) where the issue lives (optional)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      SFDX_AUTH_URL:
+        description: "Dev Hub auth URL for scratch org rotation (the default mode). Required unless TARGET_ORG_AUTH_URL is set."
+        required: false
+      TARGET_ORG_AUTH_URL:
+        description: "Target org auth URL. If set, skips scratch org creation and runs against this org directly."
+        required: false
+      CALLER_GITHUB_TOKEN:
+        description: "Token with repo scope on the caller repo (needed to push branches and post comments)"
+        required: false
+      AVA_CHECKOUT_TOKEN:
+        description: "Token with read access to RubenHalman/vibes-prompt-runner when the runner repo is private"
+        required: false
+
+jobs:
+  run-prompt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Vibes Prompt Runner
+        uses: actions/checkout@v5
+        with:
+          repository: RubenHalman/vibes-prompt-runner
+          token: ${{ secrets.AVA_CHECKOUT_TOKEN || github.token }}
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            xvfb \
+            unzip \
+            libgbm1 \
+            libxkbcommon0 \
+            libasound2t64 \
+            libx11-xcb1 \
+            libxss1 \
+            libgtk-3-0 \
+            libdrm2 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxrandr2 \
+            libxfixes3 \
+            libnss3 \
+            libnspr4 \
+            libatk1.0-0 \
+            libatk-bridge2.0-0 \
+            libcups2 \
+            libdbus-1-3 \
+            libexpat1 \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libfontconfig1
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate org secrets
+        run: |
+          if [ -z "${{ secrets.TARGET_ORG_AUTH_URL }}" ] && [ -z "${{ secrets.SFDX_AUTH_URL }}" ]; then
+            echo "::error::At least one of SFDX_AUTH_URL (scratch org mode) or TARGET_ORG_AUTH_URL (target org mode) must be set"
+            exit 1
+          fi
+
+      - name: Authenticate Salesforce org
+        run: |
+          AUTH_URL="${{ secrets.TARGET_ORG_AUTH_URL || secrets.SFDX_AUTH_URL }}"
+          echo "$AUTH_URL" > /tmp/sfdx-auth.txt
+          sf org login sfdx-url --sfdx-url-file /tmp/sfdx-auth.txt --set-default
+          rm /tmp/sfdx-auth.txt
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Download and install VS Code extensions
+        run: node scripts/bootstrap-extensions.js
+
+      # Create the linked dev branch in the client repo.
+      # The scaffolded sfdx-project/ is used as the VS Code workspace (Agentforce requires a
+      # valid SFDX project). After the test we push any changes from sfdx-project/ to this branch.
+      - name: Create dev branch
+        if: inputs.issue_number > 0 && inputs.issue_repo != ''
+        env:
+          GH_TOKEN: ${{ secrets.CALLER_GITHUB_TOKEN }}
+        run: |
+          DEV_BRANCH="ava/issue-${{ inputs.issue_number }}"
+          REMOTE="https://x-access-token:${{ secrets.CALLER_GITHUB_TOKEN }}@github.com/${{ inputs.issue_repo }}.git"
+
+          # Create branch if it doesn't exist yet
+          if ! git ls-remote --exit-code --heads "$REMOTE" "$DEV_BRANCH" > /dev/null 2>&1; then
+            DEFAULT=$(git ls-remote --symref "$REMOTE" HEAD | awk '/^ref:/{print $2}' | sed 's|refs/heads/||')
+            DEFAULT=${DEFAULT:-main}
+            BASE=$(git ls-remote "$REMOTE" "refs/heads/$DEFAULT" | cut -f1)
+            gh api repos/${{ inputs.issue_repo }}/git/refs \
+              -X POST \
+              -f ref="refs/heads/$DEV_BRANCH" \
+              -f sha="$BASE"
+            echo "Created branch $DEV_BRANCH from $DEFAULT ($BASE)"
+          else
+            echo "Branch $DEV_BRANCH already exists"
+          fi
+
+          # Link to issue in GitHub's Development panel
+          gh issue develop ${{ inputs.issue_number }} \
+            --repo "${{ inputs.issue_repo }}" \
+            --name "$DEV_BRANCH" \
+            --base main 2>/dev/null \
+            || echo "gh issue develop skipped (branch may already be linked)"
+
+          echo "DEV_BRANCH=$DEV_BRANCH" >> "$GITHUB_ENV"
+
+      - name: Mark issue as pending
+        if: inputs.issue_number > 0 && inputs.issue_repo != ''
+        env:
+          GH_TOKEN: ${{ secrets.CALLER_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "CALLER_GITHUB_TOKEN not set — skipping label update"
+            exit 0
+          fi
+          gh issue edit "${{ inputs.issue_number }}" \
+            -R "${{ inputs.issue_repo }}" \
+            --remove-label "ava-run" \
+            --add-label "ava-pending" 2>/dev/null || true
+
+      - name: Allow unprivileged user namespaces (required by Electron on Ubuntu 24.04)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Run tests with virtual display
+        id: run
+        env:
+          PROMPT: ${{ inputs.prompt }}
+          TARGET_ORG_AUTH_URL: ${{ secrets.TARGET_ORG_AUTH_URL }}
+          AUTO_APPROVE_COMMANDS: ${{ inputs.auto_approve && '1' || '0' }}
+          AUTO_SELECT_OPTION: ${{ inputs.auto_select && '1' || '0' }}
+          USE_PLAN_MODE: ${{ inputs.use_plan_mode && '1' || '0' }}
+          AVA_PROFILE: ${{ inputs.ava_profile }}
+          PROMPT_PREFIX: ${{ inputs.prompt_prefix }}
+          SAFE_COMMANDS_ALLOWLIST: ${{ inputs.safe_commands_allowlist }}
+          SFDX_PROJECT_PATH: sfdx-project
+          DISPLAY: ":99"
+        run: |
+          set +e
+          Xvfb :99 -screen 0 1920x1080x24 &
+          XVFB_PID=$!
+          sleep 2
+          npm test 2>&1 | tee /tmp/ava-output.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          kill $XVFB_PID 2>/dev/null || true
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Commit agent edits and results to dev branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.CALLER_GITHUB_TOKEN }}
+        run: |
+          ISSUE="${{ inputs.issue_number }}"
+          RUN_ID="${{ github.run_id }}"
+          REPO="${{ inputs.issue_repo || github.repository }}"
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
+          # Use the linked dev branch if available; fall back to an ad-hoc branch.
+          BRANCH="${DEV_BRANCH:-ava/run-${RUN_ID}}"
+          RUN_DIR=".ava/runs/${RUN_ID}"
+          WORK="/tmp/dev-branch-repo"
+
+          mkdir -p "$WORK"
+
+          # ── Commit & push (best-effort — no token = skip, not fail) ────────────
+          if [ -z "$GH_TOKEN" ]; then
+            echo "⚠ CALLER_GITHUB_TOKEN not set — skipping git push (results not saved to branch)"
+            echo "GIT_SKIPPED=no_token" >> "$GITHUB_ENV"
+          else
+            cd "$WORK"
+            git init -q
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git config user.name "github-actions[bot]"
+            git remote add origin "$REMOTE"
+
+            # Check out the remote branch first (before copying any files) so that
+            # git checkout never sees untracked files that conflict with remote content.
+            if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
+              git fetch -q origin "$BRANCH"
+              git checkout -b "$BRANCH" FETCH_HEAD
+            else
+              git checkout --orphan "$BRANCH"
+            fi
+
+            cd - > /dev/null
+
+            # ── Agent edits ──────────────────────────────────────────────────────
+            [ -d sfdx-project ] && cp -r sfdx-project/. "$WORK/" || true
+
+            # ── Run results ──────────────────────────────────────────────────────
+            mkdir -p "$WORK/$RUN_DIR/logs" "$WORK/$RUN_DIR/large-output"
+            cp -r sfdx-project/logs/. "$WORK/$RUN_DIR/logs/" 2>/dev/null || true
+            for f in /tmp/a4d/*.log; do
+              [ -f "$f" ] || continue
+              BASE=$(basename "$f")
+              # Raw file — exactly as Agentforce Vibes wrote it
+              cp "$f" "$WORK/$RUN_DIR/large-output/$BASE"
+              # Extracted file — sf CLI stderr noise stripped, JSON only
+              sed -n '/^{$/,$ p' "$f" > "$WORK/$RUN_DIR/large-output/${BASE%.log}.extracted.log"
+            done
+            cat > "$WORK/$RUN_DIR/run.txt" <<META
+          issue: $ISSUE
+          run_id: $RUN_ID
+          run_number: ${{ github.run_number }}
+          status: ${{ steps.run.outputs.exit_code == '0' && 'success' || 'failed' }}
+          timestamp: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          META
+
+            cd "$WORK"
+            git add -A
+            if git diff --cached --quiet; then
+              echo "Nothing to commit"
+            else
+              if git commit -q -m "ava: run ${RUN_ID} (issue #${ISSUE}, ${{ steps.run.outputs.exit_code == '0' && 'success' || 'failed' }})" \
+                  && git push -q origin "$BRANCH"; then
+                echo "Pushed to $BRANCH"
+                DEV_URL="${{ github.server_url }}/${REPO}/tree/${BRANCH}"
+                RESULTS_URL="${{ github.server_url }}/${REPO}/tree/${BRANCH}/${RUN_DIR}"
+                echo "DEV_URL=$DEV_URL" >> "$GITHUB_ENV"
+                echo "RESULTS_URL=$RESULTS_URL" >> "$GITHUB_ENV"
+              else
+                echo "⚠ git push failed — results not saved to branch (check CALLER_GITHUB_TOKEN permissions)"
+                echo "GIT_SKIPPED=push_failed" >> "$GITHUB_ENV"
+              fi
+            fi
+          fi
+
+      - name: Post results to issue
+        if: inputs.issue_number > 0 && inputs.issue_repo != ''
+        env:
+          GH_TOKEN: ${{ secrets.CALLER_GITHUB_TOKEN }}
+        run: |
+          SUCCESS="${{ steps.run.outputs.exit_code == '0' }}"
+          STATUS="${{ steps.run.outputs.exit_code == '0' && 'Success' || 'Failed' }}"
+          EMOJI="${{ steps.run.outputs.exit_code == '0' && '✅' || '❌' }}"
+
+          MODEL_TIER=$(grep -m1 'MODEL_TIER:' sfdx-project/logs/success/*.log sfdx-project/logs/failure/*.log sfdx-project/logs/pending/*.log 2>/dev/null | sed 's/.*MODEL_TIER: //' | head -1 || true)
+          [ -z "$MODEL_TIER" ] && MODEL_TIER="unknown"
+
+          LOG_FILE=""
+          if [ -d sfdx-project/logs ]; then
+            for f in sfdx-project/logs/success/*.log sfdx-project/logs/failure/*.log sfdx-project/logs/pending/*.log; do
+              [ -f "$f" ] && LOG_FILE="$f" && break
+            done
+          fi
+          [ -z "$LOG_FILE" ] && LOG_FILE=/tmp/ava-output.log
+
+          ORG_USER=$(grep -m1 -E '\[scratch-org\] (Reusing existing scratch org:|✓ Scratch org ready:|✓ Scratch org created:)' "$LOG_FILE" 2>/dev/null \
+            | sed -E 's/.*Reusing existing scratch org: ([^ ]+).*/\1/; s/.*Scratch org (ready|created): ([^ ]+).*/\2/' \
+            | head -1 || true)
+          if [ -z "$ORG_USER" ]; then
+            ORG_USER=$(sf config get target-org --json 2>/dev/null \
+              | sed -nE 's/.*"value"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
+              | head -1 || true)
+          fi
+          ORG_USER_LINE=""
+          if [ -n "$ORG_USER" ]; then
+            ORG_USER_LINE="**Org:** \`${ORG_USER}\`"
+          fi
+
+          # Extract key sections from the structured log using Python (handles UTF-8 bar chars)
+          python3 scripts/extract-log.py "$LOG_FILE" > /tmp/ava-extracted.json
+
+          ANSWER=$(jq -r '.answer'       /tmp/ava-extracted.json 2>/dev/null || true)
+          SUMMARY=$(jq -r '.summary'     /tmp/ava-extracted.json 2>/dev/null || true)
+          OPTIMIZATION=$(jq -r '.optimization' /tmp/ava-extracted.json 2>/dev/null || true)
+
+          # Key content: final answer on success, failure report on failure
+          if [ "$SUCCESS" = "true" ] && [ -n "$ANSWER" ]; then
+            KEY_CONTENT=$(printf '### Answer\n\n%s' "$ANSWER")
+          else
+            KEY_CONTENT=$(printf '### Failure Report\n\n%s' "$SUMMARY")
+            if [ -n "$OPTIMIZATION" ]; then
+              KEY_CONTENT=$(printf '%s\n\n%s' "$KEY_CONTENT" "$OPTIMIZATION")
+            fi
+          fi
+
+          # Full log for the details block
+          LOG_HEAD=$(head -n 80 "$LOG_FILE" 2>/dev/null | head -c 4000 || true)
+          LOG_TAIL=$(tail -n 100 "$LOG_FILE" 2>/dev/null | head -c 5000 || true)
+          TERMINAL_LINE=$(grep -n 'TERMINAL OUTPUT' "$LOG_FILE" 2>/dev/null | head -1 | cut -d: -f1 || true)
+          LARGE_LINE=$(grep -n 'LARGE OUTPUT' "$LOG_FILE" 2>/dev/null | head -1 | cut -d: -f1 || true)
+          RESULTS_LINE="${TERMINAL_LINE:-$LARGE_LINE}"
+
+          if [ -n "$RESULTS_LINE" ] && [ "$RESULTS_LINE" -gt 80 ]; then
+            LOG_RESULTS=$(tail -n +"$RESULTS_LINE" "$LOG_FILE" 2>/dev/null | head -c 40000 || true)
+            LOG_CONTENT=$(printf '%s\n\n[... intermediate log omitted — full details in branch ...]\n\n%s\n\n--- Run Outcome ---\n%s' "$LOG_HEAD" "$LOG_RESULTS" "$LOG_TAIL")
+          else
+            LOG_CONTENT=$(cat "$LOG_FILE" 2>/dev/null | head -c 50000 || true)
+          fi
+
+          BRANCH_LINK=""
+          if [ -n "$DEV_URL" ]; then
+            BRANCH_LINK=$(printf '\n**Branch:** \`%s\` · [run logs](%s)' "${DEV_BRANCH:-ava/run-${{ github.run_id }}}" "$RESULTS_URL")
+          elif [ -n "$GIT_SKIPPED" ]; then
+            BRANCH_LINK=$(printf '\n⚠ Results not saved to branch (CALLER_GITHUB_TOKEN missing or push failed)')
+          fi
+
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          RUN_NUM="${{ github.run_number }}"
+          {
+            printf '%s **Ava Run \xe2\x80\x94 %s**\n\n' "$EMOJI" "$STATUS"
+            printf '**Run:** [#%s](%s) \xc2\xb7 **Model:** %s%s\n' "$RUN_NUM" "$RUN_URL" "$MODEL_TIER" "$BRANCH_LINK"
+            [ -n "$ORG_USER_LINE" ] && printf '%s\n' "$ORG_USER_LINE"
+            printf '\n%s\n\n' "$KEY_CONTENT"
+            printf '<details>\n<summary>Full Logs</summary>\n\n```\n'
+            printf '%s\n' "$LOG_CONTENT"
+            printf '```\n\n</details>\n'
+          } > /tmp/ava-comment.md
+
+          gh issue comment "${{ inputs.issue_number }}" -R "${{ inputs.issue_repo }}" --body-file /tmp/ava-comment.md
+
+          LABEL="${{ steps.run.outputs.exit_code == '0' && 'ava-success' || 'ava-failed' }}"
+          gh issue edit "${{ inputs.issue_number }}" \
+            -R "${{ inputs.issue_repo }}" \
+            --remove-label "ava-pending" \
+            --add-label "$LABEL" 2>/dev/null || true
+
+      - name: Fail if tests failed
+        if: steps.run.outputs.exit_code != '0'
+        run: exit 1

@@ -1,0 +1,15 @@
+.env
+.ava-exhausted-orgs.json
+node_modules/
+out/
+dist/
+coverage/
+*.vsix
+wdio.log
+.wdio-vscode-service/
+test/extensions/
+sfdx-project
+test/logs
+.sfdx/
+/test-resources
+

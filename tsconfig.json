@@ -1,0 +1,35 @@
+{
+	"compilerOptions": {
+		"module": "commonjs",
+		"target": "es6",
+		"moduleResolution": "node",
+		"resolveJsonModule": true,
+		"outDir": "out",
+		"lib": [
+			"es2020.string",
+			"es6"
+		],
+		"experimentalDecorators": true,
+		"sourceMap": true,
+		"skipLibCheck": true,
+		"rootDir": "src",
+		"strict": false,
+		"baseUrl": ".",
+		"paths": {
+			"vscode": ["node_modules/@types/vscode/"]
+		},
+		"types": [
+			"node",
+			"@wdio/globals/types",
+			"@wdio/mocha-framework",
+			"wdio-vscode-service"
+		],
+		"esModuleInterop": true
+	},
+	"exclude": [
+		"node_modules",
+		".vscode-test",
+		"test",
+		"wdio.conf.mts"
+	]
+}

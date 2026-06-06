@@ -1,0 +1,144 @@
+# Copy this file to .github/workflows/run-ava.yml in any repo that needs ava.
+#
+# Required setup:
+#   1. In RubenHalman/vibes-prompt-runner → Settings → Actions → Access →
+#      allow this repository to call the reusable workflow, if required
+#
+#   2. Add repository secrets (Settings → Secrets → Actions):
+#
+#      Scratch org rotation (default — recommended):
+#        SFDX_AUTH_URL  your Dev Hub auth URL
+#          sf org display --verbose --target-org <dev-hub-alias> --json | jq -r '.result.sfdxAuthUrl'
+#        Each run gets its own isolated scratch org with a fresh Agentforce Pro quota.
+#        Requires a Dev Hub org (sf config set target-dev-hub <alias>).
+#
+#      Target org mode (run against a specific org instead):
+#        TARGET_ORG_AUTH_URL  auth URL of the org to target
+#          sf org display --verbose --target-org <alias> --json | jq -r '.result.sfdxAuthUrl'
+#        All runs share the same org and its Pro model quota. No Dev Hub required.
+#        Do NOT set SFDX_AUTH_URL when using this mode.
+#
+#      CALLER_GITHUB_TOKEN (required for results)
+#        Use secrets.GITHUB_TOKEN — the automatic token for this repo.
+#        Used by the engine to post comments, create branches, push results,
+#        and add/remove labels in THIS repo.
+#
+#      AVA_CHECKOUT_TOKEN (optional)
+#        A token with read access to RubenHalman/vibes-prompt-runner (e.g. a PAT or org-scoped
+#        token). Only needed if RubenHalman/vibes-prompt-runner is not already accessible to
+#        this repo via org-wide Actions access. If omitted, the engine falls
+#        back to github.token which only works within the same org/visibility.
+#
+#   3. Create labels: ava-run, ava-success, ava-failed
+#
+#   4. Copy examples/vpr-run.md to .github/ISSUE_TEMPLATE/vpr-run.md in your repo
+#      so issues get the prompt area and checkboxes pre-populated.
+#
+#
+# Usage:
+#   Open an issue with the label "ava-run". The issue body is the prompt.
+#   Results are posted as a comment on the issue.
+#
+# Issue body format (using the issue template):
+#   Write the prompt above the --- separator. The template checkboxes below it
+#   control run behaviour — tick them in the GitHub UI before submitting.
+#
+#   Supported flags (below the --- line):
+#   - [x] auto-approve  — blanket auto-approve command execution prompts by clicking
+#                         "Run Command" when Agentforce asks. Use this for hands-off runs.
+#                         Also pre-populates the safe commands allowlist with sf data query,
+#                         sf org display, and sf org list so they never block mid-run.
+#   - [x] auto-select   — auto-pick the first option when Agentforce asks a question.
+#                         Note: use together with auto-approve for data query prompts —
+#                         auto-select alone answers questions but won't approve commands.
+#                         Omit to get a NEEDS_INPUT failure listing the options.
+#   - [x] plan-mode     — start in Plan mode; VPR auto-switches to Act when
+#                         Agentforce surfaces the toggle after planning
+#   - safe-commands: sf data query,sf org display,sf org list
+#                         Optional comma-separated commands to pre-add to Agentforce's
+#                         safe commands allowlist. Vibes Prompt Runner will open the UI and seed them
+#                         before the prompt runs.
+#
+#   The parse step strips the --- footer and HTML comments before sending the
+#   prompt to Agentforce, so only your actual task text reaches the agent.
+
+name: Run Vibes Prompt Runner
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  issues: write
+  contents: write
+
+jobs:
+  parse:
+    if: contains(github.event.issue.labels.*.name, 'ava-run')
+    runs-on: ubuntu-latest
+    outputs:
+      prompt:                  ${{ steps.parse.outputs.prompt }}
+      auto_approve:            ${{ steps.parse.outputs.auto_approve }}
+      auto_select:             ${{ steps.parse.outputs.auto_select }}
+      use_plan_mode:           ${{ steps.parse.outputs.use_plan_mode }}
+      safe_commands_allowlist: ${{ steps.parse.outputs.safe_commands_allowlist }}
+    steps:
+      - name: Parse issue body
+        id: parse
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          # Clean prompt: strip everything from the --- separator onwards
+          # (template checkboxes live there), then remove HTML comment lines.
+          PROMPT=$(printf '%s' "$BODY" \
+            | awk '/^[[:space:]]*---[[:space:]]*$/{exit} {print}' \
+            | grep -v '^[[:space:]]*<!--.*-->[[:space:]]*$' \
+            | sed -e '/[^[:space:]]/,$!d')
+          echo "prompt<<EOF_PROMPT" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$PROMPT" >> "$GITHUB_OUTPUT"
+          echo "EOF_PROMPT" >> "$GITHUB_OUTPUT"
+
+          # [x] or - [x] both accepted
+          if echo "$BODY" | grep -qiE '^\s*-?\s*\[x\]\s*auto-approve'; then
+            echo "auto_approve=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "auto_approve=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$BODY" | grep -qiE '^\s*-?\s*\[x\]\s*auto-select'; then
+            echo "auto_select=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "auto_select=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$BODY" | grep -qiE '^\s*-?\s*\[x\]\s*plan-mode'; then
+            echo "use_plan_mode=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_plan_mode=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          SAFE_COMMANDS_ALLOWLIST=$(printf '%s\n' "$BODY" \
+            | sed -nE 's/^[[:space:]]*safe-commands[[:space:]]*:[[:space:]]*(.*)$/\1/Ip' \
+            | head -n 1 \
+            | sed 's/[[:space:]]*$//')
+          echo "safe_commands_allowlist=${SAFE_COMMANDS_ALLOWLIST}" >> "$GITHUB_OUTPUT"
+
+  run:
+    needs: parse
+    uses: RubenHalman/vibes-prompt-runner/.github/workflows/ava-engine.yml@main
+    with:
+      prompt:                  ${{ needs.parse.outputs.prompt }}
+      auto_approve:            ${{ needs.parse.outputs.auto_approve == 'true' }}
+      auto_select:             ${{ needs.parse.outputs.auto_select == 'true' }}
+      use_plan_mode:           ${{ needs.parse.outputs.use_plan_mode == 'true' }}
+      ava_profile:             live-analysis    # or live-metadata to retrieve metadata from the authenticated org
+      safe_commands_allowlist: ${{ needs.parse.outputs.safe_commands_allowlist }}
+      # prompt_prefix:    "Note: avoid --flag=false syntax for SF CLI boolean flags."
+      # safe_commands_allowlist: "sf data query,sf org display,sf org list,sf project generate manifest,sf project retrieve preview,sf project retrieve start"
+      issue_number:       ${{ github.event.issue.number }}
+      issue_repo:         ${{ github.repository }}
+    secrets:
+      SFDX_AUTH_URL:           ${{ secrets.SFDX_AUTH_URL }}           # Dev Hub — scratch org rotation (default)
+      # TARGET_ORG_AUTH_URL:   ${{ secrets.TARGET_ORG_AUTH_URL }}     # Target org mode — omit SFDX_AUTH_URL if using this
+      CALLER_GITHUB_TOKEN:     ${{ secrets.GITHUB_TOKEN }}
+      AVA_CHECKOUT_TOKEN:      ${{ secrets.AVA_CHECKOUT_TOKEN }}

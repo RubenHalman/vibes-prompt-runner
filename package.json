@@ -1,0 +1,81 @@
+{
+  "name": "vibes-prompt-runner",
+  "displayName": "Vibes Prompt Runner",
+  "publisher": "rubenhalman",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RubenHalman/vibes-prompt-runner.git"
+  },
+  "description": "End-to-end Agentforce prompt runner for Salesforce orgs",
+  "version": "0.1.0-beta.1",
+  "homepage": "https://github.com/RubenHalman/vibes-prompt-runner#readme",
+  "keywords": ["salesforce", "agentforce", "vibes", "prompt", "testing", "cli", "vscode", "wdio"],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "bin": {
+    "vpr": "bin/vpr.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "test/specs/",
+    "test/tsconfig.json",
+    "dist/",
+    "wdio.conf.mts",
+    "tsconfig.json",
+    "examples/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "webpack --config ./webpack.config.js",
+    "build:wdio": "webpack --env wdio=true --config ./webpack.config.js",
+    "build:coverage": "webpack --env wdio=true --env coverage=true --config ./webpack.config.js",
+    "buildup": "mkdir -p coverage/raw && npm run build:coverage",
+    "compile": "webpack --config ./webpack.config.js",
+    "package": "webpack --mode production --devtool hidden-source-map --config ./webpack.config.js",
+    "prepublishOnly": "npm run package",
+    "watch": "webpack --watch --config ./webpack.config.js",
+    "postinstall": "node scripts/patch-wdio.js",
+    "prewdio": "node scripts/setup.js",
+    "wdio": "wdio run ./wdio.conf.mts",
+    "postwdio": "pkill -9 -f 'wdio-vscode-service' 2>/dev/null || true",
+    "test": "npm run wdio",
+    "test-bootstrap": "node --test test/bootstrap-extensions.test.js",
+    "test-compile": "tsc -p ./test/tsconfig.json --noEmit",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "dependencies": {
+    "@wdio/cli": "^8.39.0",
+    "@wdio/globals": "^8.46.0",
+    "@wdio/local-runner": "^8.39.0",
+    "@wdio/mocha-framework": "^8.39.0",
+    "@wdio/spec-reporter": "^8.39.0",
+    "adm-zip": "^0.5.17",
+    "ts-node": "^10.9.2",
+    "typescript": "^4.9.5",
+    "wdio-vscode-service": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/mocha": "^10.0.7",
+    "@types/node": "20.12.7",
+    "@types/vscode": "^1.92.0",
+    "@typescript-eslint/eslint-plugin": "^7.14.1",
+    "@typescript-eslint/parser": "^7.11.0",
+    "@vscode/vsce": "3.4.0",
+    "coverage-istanbul-loader": "^3.0.5",
+    "eslint": "^8.57.0",
+    "eslint-webpack-plugin": "^4.2.0",
+    "mocha": "^10.5.2",
+    "ts-loader": "^9.5.1",
+    "webpack": "^5.92.1",
+    "webpack-cli": "^5.1.4"
+  },
+  "volta": {
+    "node": "20.19.5"
+  }
+}

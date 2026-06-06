@@ -1,0 +1,24 @@
+# Secrets and local config
+.env
+.env.*
+.ava-exhausted-orgs.json
+
+# Consumer-supplied at runtime
+sfdx-project/
+test-resources/
+test/extensions/
+
+# VS Code binary cache
+.wdio-vscode-service/
+
+# Build artifacts not needed by consumers
+coverage/
+out/
+*.vsix
+wdio.log
+
+# Development-only
+.github/
+db/
+todo.md
+node_modules/

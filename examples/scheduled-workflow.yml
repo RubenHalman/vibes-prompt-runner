@@ -1,0 +1,66 @@
+# Copy this file to .github/workflows/scheduled-vpr.yml in any repo that needs
+# Vibes Prompt Runner to run a prompt on a timer.
+#
+# This is intentionally non-invasive: it does not change the reusable engine workflow and it
+# does not run unless a consuming repository copies this example into its own
+# .github/workflows/ directory.
+#
+# Required setup:
+#   1. Add one auth secret under Settings → Secrets → Actions:
+#        - SFDX_AUTH_URL for scratch org rotation, or
+#        - TARGET_ORG_AUTH_URL for target org mode
+#
+#   2. If RubenHalman/vibes-prompt-runner is private or not Actions-accessible from this repo,
+#      add AVA_CHECKOUT_TOKEN with read access to RubenHalman/vibes-prompt-runner.
+#
+#   3. Edit the cron and prompt below.
+#
+# Notes:
+#   - GitHub cron is UTC, not your local timezone.
+#   - GitHub may delay scheduled workflows during busy periods.
+#   - Keep workflow_dispatch so you can test the exact scheduled prompt manually.
+#   - Start with TARGET_ORG_AUTH_URL for predictable beta testing, or use
+#     SFDX_AUTH_URL when you want isolated scratch org runs.
+
+name: Scheduled Vibes Prompt Runner Prompt
+
+on:
+  # Every weekday at 13:00 UTC. Change this to your desired schedule.
+  schedule:
+    - cron: "0 13 * * 1-5"
+
+  # Manual run button for testing the scheduled prompt without waiting for cron.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  scheduled-vpr:
+    uses: RubenHalman/vibes-prompt-runner/.github/workflows/ava-engine.yml@main
+    with:
+      prompt: |
+        Run a daily Salesforce org health check.
+        Use read-only Salesforce CLI commands where possible.
+        Summarize any risks, failures, or follow-up actions clearly.
+      ava_profile: live-analysis
+      auto_approve: true
+      auto_select: true
+      # Optional: pre-seed safe commands. Leave empty to use profile defaults.
+      # safe_commands_allowlist: "sf data query,sf org display,sf org list"
+      # Optional: add per-run guidance before the prompt.
+      # prompt_prefix: "Do not mutate org data or metadata unless explicitly instructed."
+    secrets:
+      # Scratch org rotation mode — Dev Hub auth URL.
+      SFDX_AUTH_URL: ${{ secrets.SFDX_AUTH_URL }}
+
+      # Target org mode — uncomment this and omit SFDX_AUTH_URL above if you want
+      # all scheduled runs to use the same org.
+      # TARGET_ORG_AUTH_URL: ${{ secrets.TARGET_ORG_AUTH_URL }}
+
+      # Required only when the engine needs to push/comment back to the caller repo.
+      CALLER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Optional unless RubenHalman/vibes-prompt-runner is private or not accessible to this repo.
+      AVA_CHECKOUT_TOKEN: ${{ secrets.AVA_CHECKOUT_TOKEN }}

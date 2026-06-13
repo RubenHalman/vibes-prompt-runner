@@ -4,19 +4,6 @@ Run Agentforce Vibes prompts against Salesforce orgs from GitHub Actions or your
 
 Vibes Prompt Runner opens a real VS Code session, starts the Agentforce Vibes extension, sends it your prompt, watches the run, captures logs, and can post the result back to GitHub. It is meant for teams that want repeatable Salesforce checks instead of one-off manual Agentforce sessions.
 
-It was previously called Ava. Some workflow names, labels, and environment variables still use `ava` so existing users do not break.
-
-## Public beta
-
-Current planned beta version: `0.1.0-beta.1`.
-
-The beta is intended for people who are comfortable running GitHub Actions against a Salesforce sandbox, scratch org, or other non-production org. Start with read-only prompts, inspect the generated logs, and only enable command auto-approval when you trust the prompt and target org.
-
-After the beta is live, the two public entry points are:
-
-- GitHub Actions reusable workflow: `RubenHalman/vibes-prompt-runner/.github/workflows/ava-engine.yml@main`
-- npm CLI: `npm install -g vibes-prompt-runner@beta`
-
 ## What you can use it for
 
 - Run a prompt whenever someone opens or labels a GitHub issue.

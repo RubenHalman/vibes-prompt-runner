@@ -8,7 +8,7 @@
     "url": "git+https://github.com/RubenHalman/vibes-prompt-runner.git"
   },
   "description": "End-to-end Agentforce prompt runner for Salesforce orgs",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "homepage": "https://github.com/RubenHalman/vibes-prompt-runner#readme",
   "keywords": ["salesforce", "agentforce", "vibes", "prompt", "testing", "cli", "vscode", "wdio"],
   "engines": {

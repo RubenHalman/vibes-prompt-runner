@@ -175,8 +175,8 @@ jobs:
           fi
           gh issue edit "${{ inputs.issue_number }}" \
             -R "${{ inputs.issue_repo }}" \
-            --remove-label "ava-run" \
-            --add-label "ava-pending" 2>/dev/null || true
+            --remove-label "vpr-run" \
+            --add-label "vpr-pending" 2>/dev/null || true
 
       - name: Allow unprivileged user namespaces (required by Electron on Ubuntu 24.04)
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
@@ -371,10 +371,10 @@ jobs:
 
           gh issue comment "${{ inputs.issue_number }}" -R "${{ inputs.issue_repo }}" --body-file /tmp/ava-comment.md
 
-          LABEL="${{ steps.run.outputs.exit_code == '0' && 'ava-success' || 'ava-failed' }}"
+          LABEL="${{ steps.run.outputs.exit_code == '0' && 'vpr-success' || 'vpr-failed' }}"
           gh issue edit "${{ inputs.issue_number }}" \
             -R "${{ inputs.issue_repo }}" \
-            --remove-label "ava-pending" \
+            --remove-label "vpr-pending" \
             --add-label "$LABEL" 2>/dev/null || true
 
       - name: Fail if tests failed

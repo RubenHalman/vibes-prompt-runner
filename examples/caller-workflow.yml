@@ -29,14 +29,14 @@
 #        this repo via org-wide Actions access. If omitted, the engine falls
 #        back to github.token which only works within the same org/visibility.
 #
-#   3. Create labels: ava-run, ava-success, ava-failed
+#   3. Create labels: vpr-run, vpr-success, vpr-failed
 #
 #   4. Copy examples/vpr-run.md to .github/ISSUE_TEMPLATE/vpr-run.md in your repo
 #      so issues get the prompt area and checkboxes pre-populated.
 #
 #
 # Usage:
-#   Open an issue with the label "ava-run". The issue body is the prompt.
+#   Open an issue with the label "vpr-run". The issue body is the prompt.
 #   Results are posted as a comment on the issue.
 #
 # Issue body format (using the issue template):
@@ -74,7 +74,7 @@ permissions:
 
 jobs:
   parse:
-    if: contains(github.event.issue.labels.*.name, 'ava-run')
+    if: contains(github.event.issue.labels.*.name, 'vpr-run')
     runs-on: ubuntu-latest
     outputs:
       prompt:                  ${{ steps.parse.outputs.prompt }}

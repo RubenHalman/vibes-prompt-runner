@@ -146,14 +146,14 @@ If you want users to open an issue and have Vibes Prompt Runner answer it, copy:
 - `examples/caller-workflow.yml` to `.github/workflows/run-vpr.yml`
 - `examples/vpr-run.md` to `.github/ISSUE_TEMPLATE/vpr-run.md`
 
-The example workflow looks for the `ava-run` label. That label name is legacy but intentionally kept for compatibility. Create these labels in the consuming repo:
+The example workflow looks for the `vpr-run` label. That label name is legacy but intentionally kept for compatibility. Create these labels in the consuming repo:
 
-- `ava-run`
-- `ava-pending`
-- `ava-success`
-- `ava-failed`
+- `vpr-run`
+- `vpr-pending`
+- `vpr-success`
+- `vpr-failed`
 
-Then open an issue using the template, write the prompt, and add the `ava-run` label.
+Then open an issue using the template, write the prompt, and add the `vpr-run` label.
 
 ## Local CLI usage
 

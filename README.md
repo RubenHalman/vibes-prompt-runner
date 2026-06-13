@@ -253,63 +253,6 @@ Local runs need:
 
 GitHub Actions runs install the needed system dependencies in the reusable workflow.
 
-## Troubleshooting
-
-### The run asks for input and then fails
-
-Set `auto_select: true` / `AUTO_SELECT_OPTION=1`, or make the prompt answer the likely question up front.
-
-### Agentforce asks for command approval
-
-Set `auto_approve: true` in GitHub Actions or `AUTO_APPROVE_COMMANDS=1` locally. Only do this for prompts you trust.
-
-### GitHub Actions says no auth secret is set
-
-Add either `TARGET_ORG_AUTH_URL` or `SFDX_AUTH_URL` under Settings -> Secrets and variables -> Actions. The target org path is simpler for the first run.
-
-### VS Code fails on Linux with `DevToolsActivePort file doesn't exist`
-
-This is usually an Electron sandbox/display issue. The reusable workflow already handles it on `ubuntu-latest`. For your own Linux host, run under Xvfb:
-
-```sh
-xvfb-run --auto-servernum npm test
-```
-
-### A local macOS run says VS Code is damaged
-
-Delete `.wdio-vscode-service/` and rerun. The setup patches and re-signs the downloaded VS Code bundle automatically.
-
-## What is included in this repo
-
-```text
-.github/workflows/ava-engine.yml    reusable GitHub Actions workflow
-bin/vpr.js                          CLI entrypoint
-examples/caller-workflow.yml         issue-triggered workflow example
-examples/scheduled-workflow.yml      cron workflow example
-examples/vpr-run.md                  issue template example
-scripts/bootstrap-extensions.js      downloads Salesforce VS Code extensions
-scripts/setup.js                     prepares auth, workspace, extensions, scratch orgs
-scripts/patch-wdio.js                patches WebdriverIO/VS Code launch quirks
-test/specs/test.e2e.ts               WebdriverIO runner that drives Agentforce
-wdio.conf.mts                        VS Code/WebdriverIO config
-```
-
-## Maintainer notes
-
-This section is intentionally lower in the README. Most users do not need it, but it explains why the harness is shaped the way it is.
-
-### Public beta release checklist
-
-For `0.1.0-beta.1`:
-
-1. Confirm CI is green on `main`.
-2. Make `RubenHalman/vibes-prompt-runner` public.
-3. Run one real consumer-repo workflow using `TARGET_ORG_AUTH_URL` against a sandbox or test org.
-4. Run `npm publish --dry-run` from a clean checkout.
-5. Publish the beta package with `npm publish --tag beta`.
-6. Create and push the matching git tag: `v0.1.0-beta.1`.
-7. Verify `npm install -g vibes-prompt-runner@beta` and `vpr --help` from a clean machine or temp project.
-
 ### Dependency versions
 
 | Component | Version | Pinned? | Source |
@@ -323,21 +266,3 @@ For `0.1.0-beta.1`:
 | WebdriverIO packages | lockfile versions | Yes | `package-lock.json` |
 
 Agentforce and Salesforce CLI are pulled as `latest` on CI runs. If something breaks without a code change, check those first.
-
-### Why the extension setup is weird
-
-`wdio-vscode-service` launches a real VS Code instance. The Salesforce extensions have to be installed as normal extensions before VS Code starts; loading them only through `--extension-development-path` does not trigger the activation events Agentforce needs.
-
-The runner also patches a few VS Code/WebdriverIO launch details:
-
-- it keeps installed extensions enabled,
-- strips Chrome-only flags that VS Code does not understand,
-- pins VS Code to avoid ChromeDriver mismatches,
-- disables the macOS Squirrel updater cache,
-- re-signs the patched VS Code app bundle on macOS.
-
-These details are mostly invisible to users, but they are why a simple headless browser test is not enough here.
-
-## Status reporting
-
-The reusable workflow exits successfully so it can always post logs and labels back to GitHub. The actual Agentforce result is captured separately in the run output, comments, and legacy labels such as `ava-success` or `ava-failed`.
